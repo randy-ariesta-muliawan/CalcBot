@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>LiMath Graphing Calculator</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <!-- Plotly untuk plotting interaktif di browser -->
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <!-- mathjs untuk evaluasi ekspresi matematika di browser -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjs@11/lib/browser/math.js"></script>
+  <style>
+    :root { --border:#e6e6e6; --muted:#777; --bg:#fafafa; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial; }
+    header { padding:12px 16px; border-bottom:1px solid var(--border); }
+    .app { display:flex; height:calc(100vh - 50px); }
+    .sidebar { width:420px; border-right:1px solid var(--border); padding:12px; overflow:auto; background:var(--bg); }
+    #plotWrap { flex:1; display:flex; flex-direction:column; min-width:0; }
+    #toolbar { padding:8px; border-bottom:1px solid var(--border); display:flex; gap:8px; align-items:center; }
+    #plot { flex:1; min-width:0; background:#fff; }
+    #backToCalculator {
+        text-decoration: none; color: inherit; }
+    h3 { margin:8px 0 10px; }
+    .list { display:flex; flex-direction:column; gap:10px; }
+    .item {
+      display:grid; grid-template-columns: 22px 1fr 140px auto;
+      grid-column-gap: 8px; grid-row-gap: 6px;
+      align-items:center; background:#fff; padding:10px; border:1px solid var(--border); border-radius:10px;
+    }
+    .dot { width:14px; height:14px; border-radius:50%; border:2px solid #0003; cursor:pointer; }
+    .dot.hidden { background:transparent !important; border:2px solid #bdbdbd !important; }
+    .expr { padding:6px 8px; width:100%; border:1px solid var(--border); border-radius:8px; min-height:34px; background:#fff; }
+    .expr:focus { outline:none; box-shadow:0 0 0 2px #00000010; }
+    .name { padding:6px 8px; width:100%; }
+    .btn { padding:6px 10px; border:1px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; }
+    .btn:active { transform:translateY(1px); }
+    .footer { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+    .error { color:#b00020; font-size:12px; margin-top:8px; white-space:pre-wrap; }
+    .spacer { flex:1; }
+    .supfrac{
+      display:inline-flex;
+      flex-direction:column;
+      align-items:center;
+      line-height:1;
+      vertical-align:super;
+      font-size:0.85em;
+      margin-left:0.02em;
+      transform: translateY(-0.05em);
+    }
+    .supfrac .num{ border-bottom:1px solid currentColor; padding:0 1px; line-height:1; }
+    .supfrac .den{ padding:0 1px; line-height:1; }
+
+    @media (max-width: 850px) {
+    .app {
+      flex-direction: column;
+      height: auto;
+    }
+
+    .sidebar {
+      width: 100%;
+      max-height: 50vh;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #plotWrap {
+      width: 100%;
+      height: calc(100vh - 50px - var(--sidebar-height, 300px));
+      flex: 1; 
+    }
+  }
+  </style>
+</head>
+<body>
+<header><strong>LiMath Graphing Calculator</strong></header>
+
+<div class="app">
+  <div class="sidebar">
+
+    <!-- Daftar fungsi/ekspresi yang akan diplot -->
+    <div class="list" id="list"></div>
+
+    <div class="footer">
+      <button class="btn" id="addBtn">+ Add equation</button>
+      <button class="btn" id="clearBtn">Clear</button>
+      <button class="btn" id="homeBtn">Home</button>
+    </div>
+
+    <div id="err" class="error"></div>
+  </div>
+
+  <div id="plotWrap">
+    <div id="toolbar">
+      <div class="spacer"></div>
+      <!-- Kontrol panning / zoom pada plot -->
+      <button class="btn" id="panLeft">←</button>
+      <button class="btn" id="panRight">→</button>
+      <button class="btn" id="panDown">↓</button>
+      <button class="btn" id="panUp">↑</button>
+      <button class="btn" id="zoomOut">−</button>
+      <button class="btn" id="zoomIn">+</button>
+      <a href="/" class="btn" id="backToCalculator">Back</a>
+    </div>
+    <div id="plot"></div>
+  </div>
+</div>
+
+<script>
+  // Dapatkan referensi elemen DOM utama
+  const list = document.getElementById('list');
+  const addBtn = document.getElementById('addBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const homeBtn = document.getElementById('homeBtn');
+  const errBox = document.getElementById('err');
+  const plotDiv = document.getElementById('plot');
+  const panLeft = document.getElementById('panLeft');
+  const panRight = document.getElementById('panRight');
+  const panUp = document.getElementById('panUp');
+  const panDown = document.getElementById('panDown');
+  const zoomInBtn = document.getElementById('zoomIn');
+  const zoomOutBtn = document.getElementById('zoomOut');
+
+  // Palet warna untuk trace
+  const palette=['#4c9c95','#e57373','#64b5f6','#81c784','#ba68c8','#ffb74d','#4dd0e1','#f06292'];
+  const HOME_XR=[-10,10], RANGE_CLAMP=1e6, OVERSCAN=0.08;
+  const view={xr:HOME_XR.slice(), yr:HOME_XR.slice()};
+  // Fungsi debounce untuk menunda pemanggilan berulang (pengoptimalan rendering)
+  function debounce(fn,ms=80){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+  const schedulePlot=debounce(plotAll,80);
+  const numFmt=new Intl.NumberFormat('en-US',{maximumFractionDigits:3});
+
+  // Peta karakter superscript untuk tampilan yang lebih rapi
+  const supMap={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'-','−':'⁻'};
+  const revSupMap={'⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','⁺':'+','⁻':'-'};
+  const varSupMap={'x':'ˣ','y':'ʸ'};
+  const revVarSupMap={'ˣ':'x','ʸ':'y'};
+
+  // Fungsi konversi ke superscript untuk tampilan (tampilan visual saja)
+  function toSuperscripts(s){
+    if(!s) return '';
+    
+    s=s.replace(/\^\{?([xy])\}?/gi, (_,v)=>varSupMap[v.toLowerCase()]||'^'+v);
+    
+    s=s.replace(/\^\{([+\-]?\d+)\}/g,(_,d)=>d.split('').map(ch=>supMap[ch]||'').join(''));
+    s=s.replace(/\^([+\-]?\d+)/g,(_,d)=>d.split('').map(ch=>supMap[ch]||'').join(''));
+    s=s.replace(/([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻])(\d+)/g,(_,supStart,tail)=>supStart+tail.split('').map(ch=>supMap[ch]||'').join(''));
+    return s;
+  }
+  // Konversi dari superscript kembali ke notasi plain
+  function fromSuperscripts(s){
+    if(!s) return '';
+    s=s.replace(/([ˣʸ])/g, m=>'^'+(revVarSupMap[m]||''));
+    return s.replace(/([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)/g,m=>{
+      const norm=m.split('').map(ch=>revSupMap[ch]||'').join('');
+      return '^(' + norm + ')';
+    });
+  }
+
+  // Beberapa fungsi utilitas string / tampilan
+  function prettifyOperatorsRaw(s){return s.replace(/>=/g,'≥').replace(/<=/g,'≤');}
+  function escapeHTML(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  // Hiasan tampilan: ubah teks menjadi HTML dengan fraction stacked, superscript, dll.
+  function decorateDisplay(plain){
+    if(!plain) return '';
+    plain = plain.replace(/\u00A0/g,' ');
+    let s = prettifyOperatorsRaw(plain);
+
+    s = s.replace(/\b(pi|π)\b/gi, 'π');
+
+    const tokens=[]; 
+    const makeToken=(a,b)=>{const i=tokens.push([a,b])-1; return `__SUPFRAC_${i}__`;};
+
+    // Tangani berbagai pola superscript pecahan seperti ^(a/b), ^a/b, dsb.
+    s = s.replace(/\^\s*\(\s*([+\-]?\d+)\s*\/\s*([+\-]?\d+)\s*\)/g,(_,a,b)=>makeToken(a,b));
+    s = s.replace(/\^\s*\[\s*([+\-]?\d+)\s*\]\s*\/\s*\[\s*([+\-]?\d+)\s*\]/g,(_,a,b)=>makeToken(a,b));
+    s = s.replace(/\^\s*([+\-]?\d+)\s*\/\s*([+\-]?\d+)(?!\s*\d)/g,(_,a,b)=>makeToken(a,b));
+    // superscript path (x¹/2)
+    const revSupMap = {'⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','⁺':'+','⁻':'-'};
+    s = s.replace(/([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)\s*\/\s*([+\-]?\d+)(?!\s*\d)/g,(m,aSup,b)=>{
+      const a = aSup.split('').map(ch=>revSupMap[ch]||'').join('');
+      return a ? makeToken(a,b) : m;
+    });
+
+    s = escapeHTML(s);
+    s = s.replace(/__SUPFRAC_(\d+)__/g,(_,i)=>{
+      const [a,b]=tokens[+i];
+      return `<span class="supfrac" data-frac="${a}/${b}"><span class="num">${a}</span><span class="den">${b}</span></span>`;
+    });
+
+    s = toSuperscripts(s);
+    return s;
+  }
+
+  // Konversi tampilan HTML kembali ke plain expression
+  function visibleToPlain(html){
+    if(!html) return '';
+    let s=html;
+    // stacked fraction → ^(a/b)
+    s=s.replace(/<span class="supfrac"[^>]*data-frac="([^"\/] +)\s*\/\s*([^\"]+)"[^>]*>[\s\S]*?<\/span>/g,'^($1/$2)');
+    s=s.replace(/<[^>]+>/g,'');
+    s=s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
+    return s;
+  }
+
+  // Konversi beberapa fragmen LaTeX/Unicode ke bentuk yang dapat dievaluasi mathjs
+  function latexToMath(s){
+    if(!s) return '';
+    s = s.replace(/\u00A0/g,' ').replace(/−/g,'-');
+
+    s = s.replace(/π/gi,'pi');
+
+    s = s.replace(/(\\cdot|×|·)/g,'*');
+    s = s.replace(/≥/g,'>=').replace(/≤/g,'<=');
+    s = s.replace(/\\sqrt\s*\{([^{}]+)\}/g,'sqrt($1)');
+    for(let i=0;i<3;i++){ s=s.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g,'($1)/($2)'); }
+    s = s.replace(/\\(sin|cos|tan|asin|acos|atan|exp|log|ln|abs|floor|ceil|max|min|pi)/g,'$1');
+    s = s.replace(/√\s*\{\s*([^{}]+)\s*\}/g,'sqrt($1)');
+    s = s.replace(/√\s*\(\s*([^()]+)\s*\)/g,'sqrt($1)');
+    s = s.replace(/√\s*([A-Za-z0-9_.]+)/g,'sqrt($1)');
+
+    s = s.replace(/\^\s*\[\s*1\s*\]\s*\/\s*\[\s*2\s*\]/g,'^(1/2)');
+    s = s.replace(/\^\s*1\s*\/\s*2(?!\d)/g,'^(1/2)');
+    s = s.replace(/\^\s*\(\s*1\s*\)\s*\/\s*2(?!\d)/g,'^(1/2)');
+    s = s.replace(/((?:[A-Za-z0-9_.]+|\([^()]+\)))\s*\^\s*\(\s*1\s*\/\s*2\s*\)/g,'sqrt($1)');
+
+    return s;
+  }
+
+  // Utilitas untuk menambahkan operator * pada tempat yang diperlukan (misal 2x -> 2*x)
+  const imul = s => s.replace(/(\d)([a-zA-Z(])/g,'$1*$2').replace(/([a-zA-Z)\]])(\d)/g,'$1*$2');
+  const stripCoordinatePairs = s => s.replace(/\(\s*([^(),]+?)\s*,\s*([^(),]+?)\s*\)/g,'');
+  const clamp=v=>Math.max(-RANGE_CLAMP,Math.min(RANGE_CLAMP,v));
+  function safeRange([a,b]){a=clamp(a);b=clamp(b);if(a===b){a-=1;b+=1;}return[a,b];}
+  function setRanges(xr,yr){view.xr=safeRange(xr.slice());view.yr=safeRange(yr.slice());
+    Plotly.relayout(plotDiv,{"xaxis.range":view.xr,"yaxis.range":view.yr});}
+  function overscannedXR(){const[a,b]=view.xr;const pad=(b-a)*OVERSCAN;return[a-pad,b+pad];}
+
+  function insertKnots(xs, knots){
+    const set=new Set(xs); knots.forEach(k=>{ if(k>=xs[0] && k<=xs[xs.length-1]) set.add(k); });
+    const out=Array.from(set).sort((a,b)=>a-b);
+    return out;
+  }
+
+  // Cari operator perbandingan dalam ekspresi (>, <, >=, <=)
+  function findComparison(s){const m=s.match(/(>=|<=|>|<)/);return m?m[1]:null;}
+  // Klasifikasi input menjadi function / implicit / inequality / error / empty
+  function classify(inputVisible){
+    let rawHtml = (inputVisible||'').trim();
+    let raw = visibleToPlain(rawHtml);
+    if(!raw) return {kind:'empty', F:null};
+    raw = fromSuperscripts(raw);
+    raw = latexToMath(raw).replace(/\u200B/g,'');
+
+    const exprOnly = stripCoordinatePairs(raw).trim();
+    if(!exprOnly) return {kind:'empty', F:null};
+
+    const unfinished = /(?:[+\-*/^]|^=|[<>=]$|\b(>=|<=|>|<)\s*)$/.test(exprOnly);
+    if (unfinished) return {kind:'empty', F:null};
+
+    try{
+      const cmp = findComparison(exprOnly);
+      if(cmp){
+        const [L,R] = exprOnly.split(cmp);
+        const code = math.compile(`(${imul(L)})-(${imul(R)})`);
+        return { kind:'inequality', op:cmp, F:(x,y)=> code.evaluate({x,y}) };
+      }
+
+      if(exprOnly.includes('=')){
+        const parts = exprOnly.split('=');
+        const L = parts[0].trim();
+        const R = parts.slice(1).join('=').trim();
+
+        const yEq = /^\s*y\s*$/i.test(L);
+        const rhsHasY = /(^|[^a-zA-Z])y([^a-zA-Z]|$)/.test(R);
+        if(yEq && !rhsHasY){
+          const rhs = imul(R);
+          const code = math.compile(rhs);
+          return {kind:'function', F: x => code.evaluate({x})};
+        }
+        const F_raw = `(${imul(L)})-(${imul(R)})`;
+        const code = math.compile(F_raw);
+        return {kind:'implicit', F:(x,y)=> code.evaluate({x,y})};
+      }
+
+      const rhs = imul(exprOnly);
+      const code = math.compile(rhs);
+      return {kind:'function', F: x => code.evaluate({x})};
+    }catch(e){
+      return {kind:'error', error: e.message};
+    }
+  }
+
+  // Ekstrak titik spesial yang dituliskan sebagai (x,y) dalam ekspresi
+  function extractSpecialPoints(inputVisible){
+    let raw=visibleToPlain(inputVisible||'');
+    raw=fromSuperscripts(raw);
+    raw=latexToMath(raw);
+    const pts=[]; const re=/\(\s*([^(),]+?)\s*,\s*([^(),]+?)\s*\)/g; let m;
+    while((m=re.exec(raw))){
+      try{
+        const x=math.evaluate(imul(m[1])); const y=math.evaluate(imul(m[2]));
+        if(Number.isFinite(x)&&Number.isFinite(y)) pts.push({x,y});
+      }catch{}
+    }
+    return pts;
+  }
+
+  // Mencari tempat akar/zero-crossings pada array xs untuk fungsi F
+  function findZeroCrossings(F, xs){
+    const out=[];
+    for(let i=1;i<xs.length;i++){
+      const x1=xs[i-1], x2=xs[i];
+      let y1=F(x1), y2=F(x2);
+      if(Number.isFinite(y1)&&Number.isFinite(y2)&&y1*y2<0){
+        const dx=x2-x1, dy=y2-y1; if(dy===0) continue;
+        const xr=x1 - y1*(dx/dy);
+        out.push(xr);
+      }
+    }
+    return out;
+  }
+
+  // Zoom relatif terhadap pusat view
+  function zoom(f){const[xa,xb]=view.xr,[ya,yb]=view.yr,xc=(xa+xb)/2,yc=(ya+yb)/2,xh=(xb-xa)*f/2,yh=(yb-ya)*f/2;
+    setRanges([xc-xh,xc+xh],[yc-yh,yc+yh]);schedulePlot();}
+  // Panning relatif fraksi dari lebar/tinggi saat ini
+  function pan(dx,dy){const[xa,xb]=view.xr,[ya,yb]=view.yr,xw=xb-xa,yw=yb-ya;
+    setRanges([xa+dx*xw,xb+dx*xw],[ya+dy*yw,yb+dy*yw]);schedulePlot();}
+  // Hitung langkah grid yang "rapi" berdasarkan lebar tampilan
+  function niceStep(target){const p=Math.pow(10,Math.floor(Math.log10(target)));
+    const m=target/p; const mult=(m<=1)?1:(m<=2)?2:(m<=5)?5:10; return mult*p;}
+  function computeGridSteps(){const width=view.xr[1]-view.xr[0];
+    const step=niceStep(width/24); const minor=step/4; return{step,minor};}
+  function sampleX(a,b){
+    const n=Math.max(400,Math.min(4000,Math.round(plotDiv.clientWidth/2)));
+    const xs=new Array(n), step=(b-a)/(n-1);
+    for(let i=0;i<n;i++) xs[i]=a+i*step;
+    return insertKnots(xs,[0]);
+  }
+  function sampleGrid(xr,yr){
+    const nx=Math.max(100,Math.min(360,Math.round(plotDiv.clientWidth/4))), ny=nx;
+    const xs=new Array(nx), ys=new Array(ny);
+    for(let i=0;i<nx;i++) xs[i]=xr[0]+(xr[1]-xr[0])*(i/(nx-1));
+    for(let j=0;j<ny;j++) ys[j]=yr[0]+(yr[1]-yr[0])*(j/(ny-1));
+    return {xs,ys,nx,ny};
+  }
+
+  // Layout dan konfigurasi dasar Plotly
+  function baseLayout(){
+    const {step,minor}=computeGridSteps();
+    return {
+      showlegend:false,uirevision:'keep',margin:{l:50,r:20,t:20,b:50},dragmode:'pan',
+      xaxis:{showgrid:true,gridcolor:'#dcdcdc',gridwidth:1,zeroline:true,exponentformat:'none',showexponent:'none',tickformat:',~g',tickmode:'linear',dtick:step,minor:{showgrid:true,gridcolor:'#eeeeee',gridwidth:1,dtick:minor}},
+      yaxis:{showgrid:true,gridcolor:'#dcdcdc',gridwidth:1,zeroline:true,scaleanchor:'x',scaleratio:1,exponentformat:'none',showexponent:'none',tickformat:',~g',tickmode:'linear',dtick:step,minor:{showgrid:true,gridcolor:'#eeeeee',gridwidth:1,dtick:minor}},
+      paper_bgcolor:'#fafafa',plot_bgcolor:'#fafafa',annotations:[]
+    };
+  }
+  function baseConfig(){return {responsive:true,displaylogo:false,scrollZoom:false,
+    modeBarButtonsToRemove:['zoom','zoomIn2d','zoomOut2d','autoScale2d','resetScale2d','lasso2d','select2d']};}
+  function hexToRgba(hex,a){
+    if(/^rgb/.test(hex)){const m=hex.match(/\d+/g).map(Number);return `rgba(${m[0]},${m[1]},${m[2]},${a})`;}
+    const mm=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if(!mm) return `rgba(0,0,0,${a})`;
+    const r=parseInt(mm[1],16),g=parseInt(mm[2],16),b=parseInt(mm[3],16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  // Fungsi utama: merender semua item ke plot (fungsi, implicit, inequality, points)
+  function plotAll(){
+    errBox.textContent='';
+    if(plotDiv.layout?.xaxis?.range&&plotDiv.layout?.yaxis?.range){
+      view.xr=safeRange(plotDiv.layout.xaxis.range); view.yr=safeRange(plotDiv.layout.yaxis.range);
+    }
+
+    const rawItems=getItems();
+    const items=[]; const errors=[];
+    rawItems.forEach((it,idx)=>{
+      let points=[];
+      try{ points=extractSpecialPoints(it.expr); }catch{}
+      try{
+        const parsed=classify(it.expr);
+        if(parsed.kind==='error') throw new Error(parsed.error);
+        if(parsed.kind!=='empty') items.push({...it,parsed,index:idx,points});
+        else if(points.length) items.push({...it,parsed:{kind:'points'},index:idx,points});
+      }catch(e){ errors.push(`${it.label}: ${e?.message||'Parse error'}`); }
+    });
+    if(errors.length) errBox.textContent=errors.join('\n');
+
+    const layout=baseLayout(); layout.xaxis.range=view.xr.slice(); layout.yaxis.range=view.yr.slice();
+    const [xmin,xmax]=overscannedXR(); const xs=sampleX(xmin,xmax);
+    const grid=sampleGrid(view.xr,view.yr);
+    if(items.length===0){ Plotly.react(plotDiv,[],layout,baseConfig()); return; }
+
+    const regionTraces=[]; const boundaryTraces=[]; const functionTraces=[]; const pointTraces=[]; const intersections=[];
+    items.forEach(it=>{
+      if(!it.visible) return;
+      const color=it.color;
+
+      if(it.parsed.kind==='function'){
+        const ys=xs.map(x=>{ try{ return it.parsed.F(x);}catch{ return null;} });
+        functionTraces.push({ x:xs,y:ys,mode:'lines',connectgaps:true,line:{width:2,color},name:it.label,
+          hovertemplate:'x=%{x}<br>y=%{y}<extra>'+it.label+'</extra>'});
+      } else if(it.parsed.kind==='implicit'){
+        const Z=new Array(grid.ny);
+        for(let j=0;j<grid.ny;j++){
+          const row=new Array(grid.nx);
+          for(let i=0;i<grid.nx;i++){
+            let v=NaN; try{ v=it.parsed.F(grid.xs[i],grid.ys[j]); }catch{}
+            row[i]=Number.isFinite(v)?v:NaN;
+          }
+          Z[j]=row;
+        }
+        boundaryTraces.push({ type:'contour', x:grid.xs, y:grid.ys, z:Z,
+          contours:{start:0,end:0,size:1,coloring:'lines',showlabels:false},
+          line:{color,width:2}, showscale:false, hoverinfo:'skip', name:it.label });
+      } else if(it.parsed.kind==='inequality'){
+        const Z=new Array(grid.ny), M=new Array(grid.ny);
+        for(let j=0;j<grid.ny;j++){
+          const row=new Array(grid.nx), maskRow=new Array(grid.nx);
+          for(let i=0;i<grid.nx;i++){
+            let v=NaN; try{ v=it.parsed.F(grid.xs[i],grid.ys[j]); }catch{}
+            row[i]=Number.isFinite(v)?v:NaN;
+            let ok=false;
+            if(Number.isFinite(v)){
+              if(it.parsed.op==='>=') ok=v>=0;
+              if(it.parsed.op==='>')  ok=v>0;
+              if(it.parsed.op==='<=') ok=v<=0;
+              if(it.parsed.op=='<')   ok=v<0;
+            }
+            maskRow[i]=ok?1:NaN;
+          }
+          Z[j]=row; M[j]=maskRow;
+        }
+        regionTraces.push({ type:'heatmap', x:grid.xs, y:grid.ys, z:M, zauto:false, zmin:0, zmax:1,
+          colorscale:[[0,hexToRgba(color,0.18)],[1,hexToRgba(color,0.18)]], showscale:false, hoverinfo:'skip', name:it.label+' region' });
+        const isStrict=(it.parsed.op==='>'||it.parsed.op=='<');
+        boundaryTraces.push({ type:'contour', x:grid.xs, y:grid.ys, z:Z,
+          contours:{start:0,end:0,size:1,coloring:'lines',showlabels:false},
+          line:{color,width:2,dash:isStrict?'dot':'solid'}, showscale:false, hoverinfo:'skip', name:it.label+' boundary' });
+      }
+
+      if(it.points && it.points.length){
+        pointTraces.push({ _isSpecial:true, type:'scatter', mode:'markers',
+          x:it.points.map(p=>p.x), y:it.points.map(p=>p.y),
+          marker:{ size:9, color:color, symbol:'circle-open', line:{width:2,color} },
+          name:(it.label||'point'), hovertemplate:'(%{x}, %{y})<extra>'+ (it.label||'') +'</extra>'});
+      }
+    });
+
+    const funItems=items.filter(it=>it.visible && it.parsed.kind==='function');
+    const impItems=items.filter(it=>it.visible && (it.parsed.kind==='implicit' || it.parsed.kind==='inequality'));
+
+    // Cari titik potong antar fungsi (fungsi vs fungsi)
+    for(let i=0;i<funItems.length;i++){
+      for(let j=i+1;j<funItems.length;j++){
+        const F1=funItems[i].parsed.F, F2=funItems[j].parsed.F;
+        const roots=findZeroCrossings(x=>{try{return F1(x)-F2(x);}catch{return NaN;}}, xs);
+        roots.forEach(xr=>{
+          try{ const y=F1(xr);
+            if(Number.isFinite(xr)&&Number.isFinite(y)
+              && !intersections.some(p=>Math.abs(p.x-xr)<1e-4 && Math.abs(p.y-y)<1e-4))
+              intersections.push({x:xr,y});
+          }catch{}
+        });
+      }
+    }
+    // Cari potong fungsi dengan implicit/inequality
+    for(const fItem of funItems){
+      const f=fItem.parsed.F;
+      for(const gItem of impItems){
+        const G = (x)=>{ try{ return gItem.parsed.F(x, f(x)); } catch { return NaN; } };
+        const roots=findZeroCrossings(G, xs);
+        roots.forEach(xr=>{
+          try{ const y=f(xr);
+            if(Number.isFinite(xr)&&Number.isFinite(y)
+              && !intersections.some(p=>Math.abs(p.x-xr)<1e-4 && Math.abs(p.y-y)<1e-4))
+              intersections.push({x:xr,y});
+          }catch{}
+        });
+      }
+    }
+    if(intersections.length>0){
+      boundaryTraces.push({ _isIntersection:true, type:'scatter', mode:'markers',
+        x:intersections.map(p=>p.x), y:intersections.map(p=>p.y),
+        marker:{ size:9, color:'#000', line:{width:2,color:'#fff'} },
+        name:'Intersections', hovertemplate:'(%{x}, %{y})<extra></extra>' });
+    }
+
+    layout.annotations=[];
+    const traces=[...regionTraces, ...boundaryTraces, ...functionTraces, ...pointTraces];
+    Plotly.react(plotDiv,traces,layout,baseConfig()).then(()=>{
+      plotDiv.removeAllListeners('plotly_click');
+      plotDiv.on('plotly_click',ev=>{
+        const pt=ev?.points?.[0]; if(!pt) return;
+        const data=plotDiv.data[pt.curveNumber];
+        if(data && (data._isSpecial || data._isIntersection)){
+          const color=data._isIntersection?'#000000':(data.marker?.color||'#444');
+          addAnnotation(pt.x,pt.y,color,!!data._isIntersection);
+        }
+      });
+      if(notesOn) applyAutoLabels();
+    });
+  }
+
+  // Tambah anotasi manual pada plot
+  function addAnnotation(x,y,color,isIntersection=false){
+    const rx=numFmt.format(x), ry=numFmt.format(y);
+    const ann={x,y,xref:'x',yref:'y',text:`(${rx}, ${ry})`,showarrow:false,
+      bgcolor:'#fff',bordercolor:color,borderwidth:1,font:{size:12,color:'#333'},
+      _type:isIntersection?'ix':'pt',_coords:`${rx},${ry}`};
+    const anns=(plotDiv.layout.annotations||[]).slice();
+    const i=anns.findIndex(a=>a._type===ann._type && a._coords===ann._coords);
+    if(i!==-1) anns.splice(i,1); else anns.push(ann);
+    Plotly.relayout(plotDiv,{annotations:anns});
+  }
+  function clearAutoAnnotations(){
+    const anns=(plotDiv.layout.annotations||[]).filter(a=>a._type!=='auto-pt' && a._type!=='auto-ix');
+    Plotly.relayout(plotDiv,{annotations:anns});
+  }
+  function applyAutoLabels(){
+    const baseAnns=(plotDiv.layout.annotations||[]).filter(a=>a._type!=='auto-pt' && a._type!=='auto-ix');
+    const [xr_min,xr_max]=view.xr; const [yr_min,yr_max]=view.yr; const anns=baseAnns.slice();
+    (plotDiv.data||[]).forEach(tr=>{
+      if(tr && (tr._isSpecial||tr._isIntersection) && Array.isArray(tr.x) && Array.isArray(tr.y)){
+        const isIx=!!tr._isIntersection;
+        for(let k=0;k<tr.x.length;k++){
+          const x=tr.x[k], y=tr.y[k];
+          if(!(Number.isFinite(x)&&Number.isFinite(y))) continue;
+          if(!(x>xr_min && x<xr_max && y>yr_min && y<yr_max)) continue;
+          const rx=numFmt.format(x), ry=numFmt.format(y);
+          anns.push({x,y,xref:'x',yref:'y',text:`(${rx}, ${ry})`,showarrow:false,
+            bgcolor:'#fff',bordercolor:isIx?'#000000':(tr.marker?.color||'#444'),borderwidth:1,
+            font:{size:12,color:'#333'},_type:isIx?'auto-ix':'auto-pt',_coords:`${rx},${ry}`});
+        }
+      }
+    });
+    Plotly.relayout(plotDiv,{annotations:anns});
+  }
+
+  // Buat baris input baru di sidebar untuk menambahkan persamaan
+  function addRow({expr='',name='',color}={}) {
+    const i=list.children.length; color=color||palette[i%palette.length];
+    const row=document.createElement('div');
+    row.className='item';
+    row.setAttribute('data-color',color);
+    row.setAttribute('data-visible','true');
+    row.innerHTML=`
+      <div class="dot" style="background:${color}" title="Hide"></div>
+      <div class="expr" contenteditable="true" spellcheck="false"></div>
+      <input class="name" placeholder="Label (optional)" value="${name}">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn" title="Remove">✕</button>
+      </div>`;
+    list.appendChild(row);
+
+    const dot=row.querySelector('.dot');
+    const exprBox=row.querySelector('.expr');
+    const nameInput=row.querySelector('.name');
+    const removeBtn=row.querySelector('button');
+
+    // Set konten awal expr dengan tampilan yang dihias
+    exprBox.innerHTML=decorateDisplay(expr);
+
+    // Toggle visibility ketika tombol dot diklik
+    dot.addEventListener('click',()=>{
+      const isHidden=row.classList.toggle('is-hidden');
+      row.setAttribute('data-visible', isHidden?'false':'true');
+      dot.classList.toggle('hidden',isHidden);
+      dot.title=isHidden?'Show':'Hide';
+      schedulePlot();
+    });
+    nameInput.addEventListener('input',schedulePlot);
+    removeBtn.addEventListener('click',()=>{ row.remove(); schedulePlot(); });
+
+    const onEdit=()=>{
+      const keepCaretEnd=()=>{
+        const r=document.createRange(); r.selectNodeContents(exprBox); r.collapse(false);
+        const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      };
+      const beforePlain=exprBox.innerText;
+      const afterHTML=decorateDisplay(beforePlain);
+      if(exprBox.innerHTML!==afterHTML){ exprBox.innerHTML=afterHTML; keepCaretEnd(); }
+      schedulePlot();
+    };
+    exprBox.addEventListener('input',onEdit);
+    exprBox.addEventListener('paste',e=>{
+      e.preventDefault();
+      const text=(e.clipboardData||window.clipboardData).getData('text');
+      document.execCommand('insertText', false, text);
+      onEdit();
+    });
+  }
+
+  // Ambil semua item dari sidebar dan ubah menjadi struktur objek
+  function getItems(){
+    return [...list.children].map((row,i)=>({
+      expr: row.querySelector('.expr').innerHTML,
+      label: row.querySelector('.name').value || `f${i+1}(x)`,
+      color: row.getAttribute('data-color') || '#444',
+      visible: row.getAttribute('data-visible')!=='false'
+    }));
+  }
+
+  // Pasang event listener untuk tombol-tombol utama
+  addBtn.addEventListener('click',()=>addRow({expr:'',name:''}));
+  clearBtn.addEventListener('click',()=>{ list.innerHTML=''; Plotly.react(plotDiv,[],baseLayout(),baseConfig()); });
+  homeBtn.addEventListener('click',()=>{ setRanges(HOME_XR,HOME_XR); schedulePlot(); });
+  zoomInBtn.addEventListener('click',()=>zoom(0.8));
+  zoomOutBtn.addEventListener('click',()=>zoom(1.25));
+  panLeft.addEventListener('click',()=>pan(-0.15,0));
+  panRight.addEventListener('click',()=>pan(0.15,0));
+  panUp.addEventListener('click',()=>pan(0,0.15));
+  panDown.addEventListener('click',()=>pan(0,-0.15));
+  window.addEventListener('keydown',e=>{
+    if(e.key==='+') zoom(0.8);
+    if(e.key==='-') zoom(1.25);
+    if(e.key==='ArrowLeft') pan(-0.15,0);
+    if(e.key==='ArrowRight') pan(0.15,0);
+    if(e.key==='ArrowUp') pan(0,0.15);
+    if(e.key==='ArrowDown') pan(0,-0.15);
+    if(e.key==='0'){ setRanges(HOME_XR,HOME_XR); schedulePlot(); }
+  });
+
+  // Set range awal view dan render pertama kali
+  setRanges(view.xr,view.yr);
+</script>
+</body>
+</html>
