@@ -15,14 +15,12 @@ CalcBot is an advanced web-based calculator application built with Python. It fo
 ```
 CalcBot/
 ├── app.py
-├── calc_core.py
 ├── requirements.txt
 ├── templates/
 │   ├── graph.html
 │   └── kalkulator.html
 ├── static/
-│   ├── css/
-│   └── js/
+│   └── favicon/
 └── README.md
 ```
 
@@ -33,9 +31,7 @@ CalcBot/
 Recommended Python packages:
 - Flask (web framework)
 - SymPy (symbolic mathematics)
-- NumPy (numeric evaluation)
-- Matplotlib or Plotly (graphing)
-- Gunicorn (for deployment)
+- Plotly (graphing)
 
 ## Installation & Running Locally
 
@@ -83,19 +79,9 @@ http://127.0.0.1:5000
 ## Implementation Notes
 - Uses **SymPy** for symbolic limits, derivatives, and integrals.  
 - Input is safely parsed using SymPy’s expression parser.  
-- Graphs are generated using Matplotlib or Plotly.  
+- Graphs are generated using Plotly.  
 - Error handling is included for invalid input.  
 - Results are rendered through HTML templates.
-
-## Deployment
-For deployment on Render, Railway, Heroku, or any cloud platform:
-
-1. Ensure `requirements.txt` is complete.  
-2. (Optional) Add a `Procfile` for Gunicorn:
-```
-web: gunicorn app:app
-```
-3. Configure environment variables (e.g., `PORT`).
 
 ## Troubleshooting
 - Plots not displaying → Ensure plot directory exists.  
