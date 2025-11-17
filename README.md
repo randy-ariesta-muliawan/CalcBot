@@ -1,23 +1,28 @@
 # CalcBot
 
-CalcBot is a simple web-based calculator application built with Python. It provides a clean interface for performing basic arithmetic operations and is structured to be easy to run, understand, and customize.
+CalcBot is an advanced web-based calculator application built with Python. It focuses on symbolic and numeric calculus operations, providing users with tools to compute limits, derivatives, integrals, and visualize functions through an integrated graphing calculator. CalcBot is designed for students, educators, and anyone who needs quick access to powerful calculus tools directly from a browser.
 
 ## Features
-- Web interface for basic arithmetic (addition, subtraction, multiplication, division)
-- Clean HTML templates for input and output pages
-- Simple and readable project structure
-- Easy to extend with new operations or UI improvements
+- Symbolic and numeric **limit** calculation  
+- Symbolic and numeric **derivative** computation  
+- **Definite and indefinite integral** solving  
+- **Graphing calculator** with function plotting  
+- Clean HTML templates for input and result pages  
+- Simple, readable project structure  
+- Easy to extend with more mathematical operations or UI improvements  
 
 ## Project Structure
 ```
 CalcBot/
 ├── app.py
+├── calc_core.py
 ├── requirements.txt
 ├── templates/
 │   ├── graph.html
 │   └── kalkulator.html
 ├── static/
-│   ├── favicon/
+│   ├── css/
+│   └── js/
 └── README.md
 ```
 
@@ -25,7 +30,12 @@ CalcBot/
 - Python 3.8+
 - pip
 
-All dependencies are listed in `requirements.txt`.
+Recommended Python packages:
+- Flask (web framework)
+- SymPy (symbolic mathematics)
+- NumPy (numeric evaluation)
+- Matplotlib or Plotly (graphing)
+- Gunicorn (for deployment)
 
 ## Installation & Running Locally
 
@@ -62,38 +72,31 @@ http://127.0.0.1:5000
 ```
 
 ## Usage
-1. Open the main page.
-2. Enter two numbers and choose an arithmetic operation.
-3. Submit the form to see the result displayed.
+1. Open the main page.  
+2. Choose an operation: Limit, Derivative, Integral, or Graph.  
+3. Enter a function such as:  
+   - `sin(x)/x`  
+   - `x**2 * exp(x)`  
+   - `1/(x-1)`  
+4. Submit the form to view symbolic results, numeric evaluation, and plots if applicable.
 
-## Customization
-- Modify `app.py` to add more operations or improve logic.
-- Edit HTML templates inside the `templates/` folder.
-- Update CSS files in `static/`.
-- Add tests using any Python testing framework.
+## Implementation Notes
+- Uses **SymPy** for symbolic limits, derivatives, and integrals.  
+- Input is safely parsed using SymPy’s expression parser.  
+- Graphs are generated using Matplotlib or Plotly.  
+- Error handling is included for invalid input.  
+- Results are rendered through HTML templates.
 
 ## Deployment
-To deploy on services like Render, Railway, or Heroku:
+For deployment on Render, Railway, Heroku, or any cloud platform:
 
-1. Make sure `requirements.txt` is complete.
-2. (Optional) Add a `Procfile` if using a production server such as Gunicorn:
-   ```
-   web: gunicorn app:app
-   ```
-3. Configure environment variables such as `PORT` if required.
+1. Ensure `requirements.txt` is complete.  
+2. (Optional) Add a `Procfile` for Gunicorn:
+```
+web: gunicorn app:app
+```
+3. Configure environment variables (e.g., `PORT`).
 
 ## Troubleshooting
-- If the app fails to start, verify your Python version and installed dependencies.
-- If port 5000 is already in use, run Flask on another port:
-  ```
-  flask run --port 8000
-  ```
-
-## Contributing
-1. Fork this repository.
-2. Create a new branch:
-   ```
-   git checkout -b feature/my-update
-   ```
-3. Commit your changes.
-4. Push the branch and open a Pull Request.
+- Plots not displaying → Ensure plot directory exists.  
+- Heavy expressions may require optimization.
