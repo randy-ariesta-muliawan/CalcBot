@@ -98,6 +98,3 @@ To deploy on services like Render, Railway, or Heroku:
    ```
 3. Commit your changes.
 4. Push the branch and open a Pull Request.
-
-## License
-Add a `LICENSE` file with the license of your choice (MIT recommended).
