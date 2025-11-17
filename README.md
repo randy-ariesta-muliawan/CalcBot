@@ -14,8 +14,8 @@ CalcBot/
 ├── app.py
 ├── requirements.txt
 ├── templates/
-│   ├── index.html
-│   └── result.html
+│   ├── graph.html
+│   └── kalkulator.html
 ├── static/
 │   ├── favicon/
 └── README.md
