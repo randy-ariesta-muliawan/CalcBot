@@ -18,7 +18,6 @@ CalcBot/
 │   └── result.html
 ├── static/
 │   ├── favicon/
-│   └── css/
 └── README.md
 ```
 
