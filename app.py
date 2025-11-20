@@ -12,7 +12,7 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app)  # Mengaktifkan CORS untuk pengembangan
 
 # Konfigurasi Gemini (ambil dari environment, fallback ke default yang ada)
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyCDqKtoTpheqe81WVZwwV5ovfVxvUMt8sI').strip()
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
 GEMINI_API_URL = os.environ.get('GEMINI_API_URL',
     ('https://generativelanguage.googleapis.com/v1beta/models/'
      'gemini-2.5-flash-preview-09-2025:generateContent?key=' + GEMINI_API_KEY)
@@ -300,3 +300,4 @@ if __name__ == '__main__':
     Path('static').mkdir(exist_ok=True)
     # Jalankan server Flask (debug True untuk pengembangan)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
+
