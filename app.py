@@ -33,7 +33,28 @@ def sanitize_expr_input(s):
     """
     if s is None:
         return ''
+    s = str(s)
+
+    # dasar
     s = s.replace('^', '**').replace('π', 'pi')
+
+    # Daftar fungsi/kata yang ingin kita lindungi/perbaiki (samakan dengan SYMPY_LOCALS)
+    funcs = ['sin','cos','tan','asin','acos','atan','ln','log','sqrt','exp']
+
+    # 1) Jika ada pola seperti 's*i*n' -> gabungkan menjadi 'sin' (khusus untuk nama fungsi)
+    for fn in funcs:
+        # buat pola seperti s\*i\*n (case-insensitive)
+        pat = r'(?i)\b' + r'\*'.join(list(fn)) + r'\b'
+        s = re.sub(pat, fn, s)
+
+    # 2) Jika ada pola 'sin*(...' -> ubah menjadi 'sin(' (hapus '*' setelah nama fungsi)
+    for fn in funcs:
+        s = re.sub(rf'(?i)\b{fn}\*\s*\(', rf'{fn}(', s)
+
+    # 3) Hati-hati: jangan menghapus semua '*' antar-huruf; hanya handle kasus-kasus di atas.
+    #    (Opsional) juga hilangkan spasi berlebih
+    s = re.sub(r'\s+', ' ', s).strip()
+
     return s
 
 def parse_expr(expr_str, variable='x'):
@@ -175,12 +196,13 @@ def static_files(filename):
 def compute():
     # Ambil payload JSON dari client
     payload = request.json or {}
+
     expr_str = payload.get('expression', '')
     op = payload.get('operation', 'derivative')
     var = payload.get('variable', 'x')
     limit_point = payload.get('limit_point')
     limit_dir = payload.get('limit_direction', 'both')
-    derivative_order = int(payload.get('derivative_order', 1))
+    derivative_order = int(payload.get('derivative_order', 1) or 1)
     integral_lower = payload.get('integral_lower')
     integral_upper = payload.get('integral_upper')
 
@@ -300,4 +322,3 @@ if __name__ == '__main__':
     Path('static').mkdir(exist_ok=True)
     # Jalankan server Flask (debug True untuk pengembangan)
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
-
