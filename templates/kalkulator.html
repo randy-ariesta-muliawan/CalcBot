@@ -376,12 +376,24 @@ function renderUI(){ renderTabs(); renderTabInputs(); renderButton(); renderResu
 
 function sanitizeInputForSympy(expression){
   if (!expression) return '';
-  let s = expression;
-  s = s.replace(/\^/g,'**'); // ubah ^ menjadi ** untuk Python/SymPy
-  s = s.replace(/([0-9.])([a-zA-Z(])/g,'$1*$2'); // tambahkan '*' antara angka dan variabel
-  s = s.replace(/([a-zA-Z)])(\()/g,'$1*$2'); // tambahkan '*' sebelum '('
-  s = s.replace(/(\))([a-zA-Z0-9])/g,'$1*$2');
-  s = s.replace(/([a-zA-Z])([a-zA-Z])/g,'$1*$2');
+  let s = String(expression);
+
+  s = s.replace(/\^/g, '**');
+
+  s = s.replace(/π/g, 'pi');
+  const funcs = ['sin','cos','tan','asin','acos','atan','ln','log','sqrt','exp'];
+
+  funcs.forEach(fn => {
+    const re = new RegExp(fn + '\\s+([0-9A-Za-zπ\\(])', 'gi');
+    s = s.replace(re, (m, g1) => `${fn}(${g1}`);
+  });
+
+  s = s.replace(/(\d(?:\.\d+)?)\s*(?=[A-Za-zπ\(])/g, '$1*');
+  s = s.replace(/\)\s*(?=[A-Za-z0-9π\(])/g, ')*');
+  s = s.replace(/(?<![A-Za-z])(x|y|z|pi)\s*(?=\()/gi, '$1*');
+  s = s.replace(/\b([a-zA-Z])\s+([a-zA-Z])\b/g, '$1*$2');
+  s = s.replace(/\s+/g, ' ').trim();
+
   return s;
 }
 
